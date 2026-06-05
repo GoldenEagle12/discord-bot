@@ -7,14 +7,34 @@ import hashlib
 import time
 import os
 import re
+import sys
+import logging
 from dotenv import load_dotenv
 from flask import Flask
 import threading
+
+# إعداد logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 
 # تحميل المتغيرات من ملف .env
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN')
+
+# التحقق من التوكن
+if not TOKEN:
+    logging.error("❌ DISCORD_TOKEN مو موجود في Environment Variables!")
+    logging.error("أضف المتغير DISCORD_TOKEN في Render أو في ملف .env")
+    raise ValueError("DISCORD_TOKEN is required!")
+
+logging.info("✅ DISCORD_TOKEN loaded successfully")
+
 # مصادر فحص مجانية بدون API
 HYBRID_ANALYSIS_API = "https://www.hybrid-analysis.com/api/v2"
 KASPERSKY_API = "https://tip.kaspersky.com/api"
@@ -26,8 +46,13 @@ app = Flask('')
 def home():
     return "✅ Bot is running!"
 
+@app.route('/health')
+def health():
+    return {"status": "healthy"}, 200
+
 def run_server():
-    app.run(host='0.0.0.0', port=8080)
+    logging.info("Starting Flask server...")
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
 
 # إعداد البوت
 intents = discord.Intents.default()
@@ -35,13 +60,19 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f'✅ تم تسجيل الدخول كـ {bot.user}')
-    print(f'🔗 ID: {bot.user.id}')
+    logging.info(f'✅ تم تسجيل الدخول كـ {bot.user}')
+    logging.info(f'🔗 ID: {bot.user.id}')
     try:
         synced = await bot.tree.sync()
-        print(f"✅ تم مزامنة {len(synced)} أمر/أوامر")
+        logging.info(f"✅ تم مزامنة {len(synced)} أمر/أوامر")
     except Exception as e:
-        print(f"❌ خطأ في المزامنة: {e}")
+        logging.error(f"❌ خطأ في المزامنة: {e}")
+
+@bot.event
+async def on_command_error(ctx, error):
+    logging.error(f"Command error: {error}")
+    if hasattr(ctx, 'followup'):
+        await ctx.followup.send(f"❌ خطأ: {str(error)}", ephemeral=True)
 
 @app_commands.command(name="scan", description="فحص ملف من عدة مصادر أمنية")
 @app_commands.describe(file="الملف المراد فحصه")
@@ -277,8 +308,20 @@ bot.tree.add_command(deobfuscate)
 
 # تشغيل البوت مع Flask
 if __name__ == "__main__":
+    logging.info("=" * 50)
+    logging.info("🚀 Starting Discord Security Bot...")
+    logging.info("=" * 50)
+    
     # تشغيل Flask في thread منفصل
-    threading.Thread(target=run_server).start()
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    logging.info("✅ Flask server started")
     
     # تشغيل البوت
-    bot.run(TOKEN)
+    try:
+        logging.info("🔌 Connecting to Discord...")
+        bot.run(TOKEN)
+    except Exception as e:
+        logging.error(f"❌ Failed to start bot: {e}")
+        sys.exit(1)
+
